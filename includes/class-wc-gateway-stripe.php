@@ -647,6 +647,8 @@ class WC_Gateway_Stripe extends WC_Stripe_Payment_Gateway {
 				if ( 'requires_action' === $intent->status ) {
 					$this->unlock_order_payment( $order );
 
+					$this->save_payment_method( $prepared_source->customer_instance );
+
 					if ( is_wc_endpoint_url( 'order-pay' ) ) {
 						$redirect_url = add_query_arg( 'wc-stripe-confirmation', 1, $order->get_checkout_payment_url( false ) );
 
@@ -700,6 +702,37 @@ class WC_Gateway_Stripe extends WC_Stripe_Payment_Gateway {
 				'result'   => 'fail',
 				'redirect' => '',
 			];
+		}
+	}
+
+	/**
+	  * Saves payment methods if the user has intended to do so
+	  */
+	public function save_payment_method( $customer ) {
+		$user_id        = get_current_user_id();
+		$payment_method = isset( $_POST['payment_method'] ) ? wc_clean( wp_unslash( $_POST['payment_method'] ) ) : 'stripe';
+
+		// This checks to see if customer opted to save the payment method to file.
+		$maybe_saved_card = isset( $_POST[ 'wc-' . $payment_method . '-new-payment-method' ] ) && ! empty( $_POST[ 'wc-' . $payment_method . '-new-payment-method' ] );
+
+		if ( ! empty( $_POST['stripe_source'] ) ) {
+			$source_object = self::get_source_object( wc_clean( wp_unslash( $_POST['stripe_source'] ) ) );
+
+			/**
+			 * This is true if the user wants to store the card to their account.
+			 * Criteria to save to file is they are logged in, they opted to save or product requirements and the source is
+			 * actually reusable. Either that or force_save_source is true.
+			 */
+			if ( ( $user_id && $this->saved_cards && $maybe_saved_card && 'reusable' === $source_object->usage ) || $force_save_source ) {
+				$response = $customer->add_source( $source_object->id );
+
+				if ( ! empty( $response->error ) ) {
+					throw new WC_Stripe_Exception( print_r( $response, true ), $this->get_localized_error_message_from_response( $response ) );
+				}
+				if ( is_wp_error( $response ) ) {
+					throw new WC_Stripe_Exception( $response->get_error_message(), $response->get_error_message() );
+				}
+			}
 		}
 	}
 
